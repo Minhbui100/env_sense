@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sensor Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 300px;
+            margin-bottom: 20px;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: center;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Temperature & Humidity Today</h1>
+<div>
+    <table id="current_table">
+        <thead>
+            <tr>
+                <th>Current Temperature</th>
+                <th>Current Humidity</th>
+            </tr>
+        </thead>
+        <tbody id="currenttable"></tbody>
+    </table>
+</div>
+
+<canvas id="tempChart"></canvas>
+
+<script>
+let tempChart;
+let predictChart;
+
+async function fetchData() {
+    const range = document.getElementById("rangeSelect").value;
+    const res = await fetch(`/api/data?range=${range}`);
+    const data = await res.json();
+    if (data.length === 0) return;
+
+    const timestamps = data.map(d => d.timestamp);
+    const temps = data.map(d => d.temperature);
+    const hums = data.map(d => d.humidity);
+
+    updateCharts(timestamps, temps, hums);
+
+    const curTemp=temps[temps.length-1];
+    const curHum=hums[hums.length-1];
+
+    updatecurrent(curTemp, curHum);
+}
+
+function updateCharts(labels, temps, hums) {
+    if (!tempChart) {
+        tempChart = new Chart(document.getElementById("tempChart"), {
+            type: "line",
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: "Temperature (°C)",
+                    data: temps
+                },
+            {
+                    label: "Humidity (%)",
+                    data: hums
+                }]
+            },
+        });
+
+    } else {
+        tempChart.data.labels = labels;
+        tempChart.data.datasets[0].data = temps;
+        tempChart.data.datasets[1].data = hums;
+        tempChart.update();
+
+    }
+}
+
+function updatecurrent(temps, hums){
+    const tbody = document.getElementById("currenttable");
+
+    tbody.innerHTML = `
+        <tr>
+            <td>${temps.toFixed(1)} °C</td>
+            <td>${hums.toFixed(1)} %</td>
+        </tr>
+    `;
+}
+
+
+async function fetchPredictions() {
+    const res = await fetch("/api/predict");
+    const preds = await res.json();
+
+    const labels = preds.map((_, i) => `+${i + 1}`);
+    const predTemps = preds.map(p => p.temperature);
+    const predHums = preds.map(p => p.humidity);
+
+    console.log("Predicted temps:", predTemps);
+    console.log("Predicted hums:", predHums);
+
+    updatePredictCharts(labels, predTemps, predHums);
+}
+
+function updatePredictCharts(labels, predTemps, predHums) {
+    if (!predictChart) {
+        predictChart = new Chart(document.getElementById("predictionChart"),{
+            type: "line",
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: "Predicted Temperature (°C)",
+                    data: predTemps
+                },
+            {
+                    label: "Predicted Humidity (%)",
+                    data: predHums
+                }]
+            },
+        });
+
+    } else {
+        predictChart.data.labels = labels;
+        predictChart.data.datasets[0].data = predTemps;
+        predictChart.data.datasets[1].data = predHums;
+        predictChart.update();
+
+    }
+}
+
+fetchData();
+setInterval(fetchData, 5000);
+fetchPredictions();
+setInterval(fetchPredictions, 5000);
+
+</script>
+
+<label for="rangeSelect">Select Time Range:</label>
+<select id="rangeSelect" onchange="fetchData()">
+    <option value="today" selected>Today</option>
+    <option value="24h">Last 24 Hours</option>
+    <option value="7d">Last 7 Days</option>
+</select>
+
+
+<h2>Predicted Temperature & Humidity in 2 hours</h2>
+<canvas id="predictionChart"></canvas>
+
+</body>
+</html>

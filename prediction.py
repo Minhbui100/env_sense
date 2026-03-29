@@ -13,9 +13,9 @@ def get_db_data():
     )
 
     query = """
-        SELECT temperature, humidity, timestamp
-        FROM dht11
-        ORDER BY timestamp
+        SELECT temperature, humidity, recorded_at
+        FROM sensor_data
+        ORDER BY recorded_at
     """
 
     df = pd.read_sql(query, conn)

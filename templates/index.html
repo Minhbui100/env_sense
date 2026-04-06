@@ -1,186 +1,298 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<title>Environment Dashboard</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Environment Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      margin-bottom: 24px;
+      color: #f8fafc;
+      letter-spacing: 0.02em;
+    }
+
+    h2 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .card {
+      background: #1e2130;
+      border: 1px solid #2d3347;
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 16px;
+    }
+
+    .stat {
+      background: #252a3d;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .stat .label {
+      font-size: 0.72rem;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+    }
+
+    .stat .value {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+
+    .stat .value.temp  { color: #f97316; }
+    .stat .value.hum   { color: #38bdf8; }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    select {
+      background: #252a3d;
+      color: #e2e8f0;
+      border: 1px solid #3b4263;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+
+    .last-updated {
+      font-size: 0.78rem;
+      color: #475569;
+      margin-left: auto;
+    }
+
+    canvas { width: 100% !important; }
+
+    .spinner {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 60px;
+      color: #475569;
+      font-size: 0.9rem;
+    }
+
+    .error-msg {
+      color: #f87171;
+      font-size: 0.85rem;
+      margin-top: 8px;
+    }
+  </style>
 </head>
-
 <body>
+<div class="container">
 
-<h2>Current Conditions</h2>
+<h1>Environment Monitor</h1>
 
-<table border="1">
-<tr>
-<th>Indoor Temp</th>
-<th>Indoor Humidity</th>
-<th>Outside Temp</th>
-<th>Outside Humidity</th>
-</tr>
-<tbody id="current"></tbody>
-</table>
+<div class="card">
+  <h2>Current Conditions</h2>
+  <div id="current-error" class="error-msg" style="display:none"></div>
+  <div class="stats-grid" id="stats">
+    <div class="stat"><div class="label">Inside Temp</div><div class="value temp" id="s-it">--</div></div>
+    <div class="stat"><div class="label">Inside Humidity</div><div class="value hum" id="s-ih">--</div></div>
+    <div class="stat"><div class="label">Outside Temp</div><div class="value temp" id="s-ot">--</div></div>
+    <div class="stat"><div class="label">Outside Humidity</div><div class="value hum" id="s-oh">--</div></div>
+  </div>
+</div>
 
-<br>
+<div class="card">
+  <h2>Historical Data</h2>
+  <div class="controls">
+    <label for="rangeSelect">Range:</label>
+    <select id="rangeSelect" onchange="fetchData()">
+      <option value="today">Today</option>
+      <option value="24h">Last 24h</option>
+      <option value="7d">Last 7 Days</option>
+    </select>
+    <span class="last-updated" id="hist-updated"></span>
+  </div>
+  <div id="hist-spinner" class="spinner">Loading...</div>
+  <div id="hist-error" class="error-msg" style="display:none"></div>
+  <canvas id="chart" style="display:none"></canvas>
+</div>
 
-<label>Range:</label>
-<select id="rangeSelect">
-<option value="today">Today</option>
-<option value="24h">Last 24h</option>
-<option value="7d">Last 7 Days</option>
-</select>
+<div class="card">
+  <h2>24-Hour Forecast</h2>
+  <span class="last-updated" id="pred-updated"></span>
+  <div id="pred-spinner" class="spinner">Loading...</div>
+  <div id="pred-error" class="error-msg" style="display:none"></div>
+  <canvas id="predictionChart" style="display:none"></canvas>
+</div>
 
-<br><br>
-
-<canvas id="chart"></canvas>
-
-<br><br>
-
-<h2>Prediction</h2>
-<canvas id="predictionChart"></canvas>
-
+</div> <!-- /.container -->
 <script>
-
-let chart
-let predictionChart
-
-async function fetchData(){
-
-    const range=document.getElementById("rangeSelect").value
-
-    const res=await fetch(`/api/data?range=${range}`)
-    const data=await res.json()
-
-    if(data.length===0) return
-
-    const labels=data.map(d=>d.recorded_at)
-    const inside_temp=data.map(d=>d.inside_temp)
-    const inside_humidity=data.map(d=>d.inside_humidity)
-    const outside_temp=data.map(d=>d.outside_temp)
-    const outside_humidity=data.map(d=>d.outside_humidity)
-
-    updateChart(labels,inside_temp,inside_humidity, outside_temp,outside_humidity)
+const CHART_DEFAULTS = {
+  responsive: true,
+  interaction: { mode: "index", intersect: false },
+  plugins: { legend: { labels: { color: "#94a3b8", boxWidth: 12 } } },
+  scales: {
+    x: { ticks: { color: "#64748b", maxTicksLimit: 24 }, grid: { color: "#1e2130" } },
+    y: { ticks: { color: "#64748b" }, grid: { color: "#2d3347" } }
+  }
 }
 
+let chart, predictionChart
 
-function updateChart(labels,inside_temp,inside_humidity, outside_temp,outside_humidity){
-    if(!chart){
-        chart=new Chart(document.getElementById("chart"),{
-            type:"line",
-            data:{
-                labels:labels,
-                datasets: [
-                    {
-                        label: "Inside Temperature °F",
-                        data: inside_temp,
-                        borderColor: "red",       
-                        tension: 0.3              
-                    },
-                    {
-                        label: "Inside Humidity %",
-                        data: inside_humidity,
-                        borderColor: "blue",
-                        tension: 0.3
-                    },
-                    {
-                        label: "Outside Temperature °F",
-                        data: outside_temp,
-                        borderColor: "rgb(255, 150, 150)",
-                        tension: 0.3
-                    },
-                    {
-                        label: "Outside Humidity %",
-                        data: outside_humidity,
-                        borderColor: "rgba(54, 162, 235, 0.5)",
-                        tension: 0.3
-                    }
-                ]
+async function fetchCurrent() {
+  try {
+    const res  = await fetch("/api/current")
+    const data = await res.json()
 
-            }
-        })
-    }else{
+    if (!res.ok) throw new Error(data.error || "Request failed")
 
-        chart.data.labels=labels
-        chart.data.datasets[0].data=inside_temp
-        chart.data.datasets[1].data=inside_humidity
-        chart.data.datasets[2].data=outside_temp
-        chart.data.datasets[3].data=outside_humidity
-        chart.update()
+    document.getElementById("s-it").textContent = data.inside_temp.toFixed(1)  + " °F"
+    document.getElementById("s-ih").textContent = data.inside_humidity.toFixed(1) + " %"
+    document.getElementById("s-ot").textContent = data.outside_temp.toFixed(1) + " °F"
+    document.getElementById("s-oh").textContent = data.outside_humidity.toFixed(1) + " %"
+    document.getElementById("current-error").style.display = "none"
+  } catch (e) {
+    document.getElementById("current-error").textContent = "Could not load current data: " + e.message
+    document.getElementById("current-error").style.display = ""
+  }
+}
+
+async function fetchData() {
+  const range   = document.getElementById("rangeSelect").value
+  const spinner = document.getElementById("hist-spinner")
+  const errEl   = document.getElementById("hist-error")
+  const canvas  = document.getElementById("chart")
+
+  spinner.style.display = ""
+  canvas.style.display = "none"
+  errEl.style.display = "none"
+
+  try {
+    const res = await fetch(`/api/data?range=${range}`)
+    const data = await res.json()
+
+    if (!res.ok) throw new Error(data.error || "Request failed")
+
+    const labels = data.map(d => d.recorded_at.slice(5, 10) + " " + d.recorded_at.slice(11, 16)) // MM-DD HH:MM
+    const iTemps = data.map(d => d.inside_temp)
+    const iHums = data.map(d => d.inside_humidity)
+    const oTemps = data.map(d => d.outside_temp)
+    const oHums = data.map(d => d.outside_humidity)
+
+    if (!chart) {
+      chart = new Chart(canvas, {
+        type: "line",
+        data: { labels, datasets: [
+          { label: "Inside Temp °F",    data: iTemps, borderColor: "#f97316", backgroundColor: "transparent", tension: 0.3, pointRadius: 0 },
+          { label: "Inside Humidity %", data: iHums,  borderColor: "#38bdf8", backgroundColor: "transparent", tension: 0.3, pointRadius: 0 },
+          { label: "Outside Temp °F",   data: oTemps, borderColor: "#fb923c", backgroundColor: "transparent", tension: 0.3, pointRadius: 0, borderDash: [4,3] },
+          { label: "Outside Humidity %",data: oHums,  borderColor: "#7dd3fc", backgroundColor: "transparent", tension: 0.3, pointRadius: 0, borderDash: [4,3] }
+        ]},
+        options: CHART_DEFAULTS
+      })
+    } else {
+      chart.data.labels = labels
+      chart.data.datasets[0].data = iTemps
+      chart.data.datasets[1].data = iHums
+      chart.data.datasets[2].data = oTemps
+      chart.data.datasets[3].data = oHums
+      chart.update()
     }
+
+    document.getElementById("hist-updated").textContent = "Updated " + new Date().toLocaleTimeString()
+    canvas.style.display = ""
+  } catch (e) {
+    errEl.textContent = "Could not load chart data: " + e.message
+    errEl.style.display = ""
+  } finally {
+    spinner.style.display = "none"
+  }
 }
 
+async function fetchPredictions() {
+  const spinner = document.getElementById("pred-spinner")
+  const errEl = document.getElementById("pred-error")
+  const canvas = document.getElementById("predictionChart")
 
-async function fetchData_current(){
+  spinner.style.display = ""
+  canvas.style.display = "none"
+  errEl.style.display = "none"
 
-    const res=await fetch(`/api/current`)
-    const data=await res.json()
+  try {
+    const res = await fetch("/api/predict")
+    const preds = await res.json()
 
-    if(data.length===0) return
+    if (!res.ok) throw new Error(preds.error || "Request failed")
 
-    const d = data[0]
+    const labels = preds.map(p => p.time.slice(11, 16)) // HH:MM
+    const temps = preds.map(p => p.temperature)
+    const hums = preds.map(p => p.humidity)
 
-
-    updateCurrent(d.inside_temp,
-        d.inside_humidity,
-        d.outside_temp,
-        d.outside_humidity)
-}
-
-function updateCurrent(inside_temp,inside_humidity, outside_temp,outside_humidity){
-
-    document.getElementById("current").innerHTML=
-    `<tr>
-    <td>${inside_temp.toFixed(1)} °F</td>
-    <td>${inside_humidity.toFixed(1)} %</td>
-    <td>${outside_temp.toFixed(1)} °F</td>
-    <td>${outside_humidity.toFixed(1)} %</td>
-    </tr>`
-}
-
-async function fetchPredictions(){
-
-    const res=await fetch("/api/predict")
-    const preds=await res.json()
-
-    const labels=preds.map((_,i)=>i+1)
-    const temps=preds.map(p=>p.temperature)
-    const hums=preds.map(p=>p.humidity)
-
-    if(!predictionChart){
-
-        predictionChart=new Chart(document.getElementById("predictionChart"),{
-            type:"line",
-            data:{
-                labels:labels,
-                datasets:[
-                {
-                    label:"Predicted Temp",
-                    data:temps
-                },
-                {
-                    label:"Predicted Humidity",
-                    data:hums
-                }]
-            }
-        })
-
-    }else{
-
-        predictionChart.data.labels=labels
-        predictionChart.data.datasets[0].data=temps
-        predictionChart.data.datasets[1].data=hums
-        predictionChart.update()
-
+    if (!predictionChart) {
+      predictionChart = new Chart(canvas, {
+        type: "line",
+        data: { labels, datasets: [
+          { label: "Predicted Temp °F", data: temps, borderColor: "#f97316", backgroundColor: "rgba(249,115,22,0.08)", fill: true, tension: 0.4, pointRadius: 0 },
+          { label: "Predicted Humidity %", data: hums,  borderColor: "#38bdf8", backgroundColor: "rgba(56,189,248,0.08)",  fill: true, tension: 0.4, pointRadius: 0 }
+        ]},
+        options: CHART_DEFAULTS
+      })
+    } else {
+      predictionChart.data.labels = labels
+      predictionChart.data.datasets[0].data = temps
+      predictionChart.data.datasets[1].data = hums
+      predictionChart.update()
     }
+
+    document.getElementById("pred-updated").textContent = "Updated " + new Date().toLocaleTimeString()
+    canvas.style.display = ""
+  } catch (e) {
+    errEl.textContent = "Could not load predictions: " + e.message
+    errEl.style.display = ""
+  } finally {
+    spinner.style.display = "none"
+  }
 }
 
+fetchCurrent()
 fetchData()
-fetchData_current()
 fetchPredictions()
 
-setInterval(fetchData,300000)
-setInterval(fetchData_current,300000)
-setInterval(fetchPredictions,300000)
-
+setInterval(fetchCurrent, 60_000)   
+setInterval(fetchData, 300_000)   
+setInterval(fetchPredictions,300_000)
 </script>
-
 </body>
 </html>

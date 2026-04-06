@@ -1,68 +1,54 @@
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-import psycopg2
 import time
+import requests
+import psycopg2
+from config import DB_HOST, DB_NAME, DB_USER, DB_PASSWORD
 
+LAT = 29.5819
+LON = -95.7608
+INTERVAL = 5 * 60 
 
-conn = psycopg2.connect(
-    host="localhost",
-    database="environment",
-    user="postgres",
-    password="postgres"
+URL = (
+    "https://api.open-meteo.com/v1/forecast"
+    f"?latitude={LAT}&longitude={LON}"
+    "&current=temperature_2m,relative_humidity_2m"
+    "&temperature_unit=fahrenheit"
+    "&timezone=America%2FChicago"
 )
-cur = conn.cursor()
 
-URL = "https://www.accuweather.com/en/us/richmond/77469/hourly-weather-forecast/335868"
+def get_db_connection():
+    return psycopg2.connect(
+        host=DB_HOST,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
+    )
 
 def get_weather():
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
-    wait = WebDriverWait(driver, 20)
-
     try:
-        driver.get(URL)
+        resp = requests.get(URL, timeout=10)
+        resp.raise_for_status()
+        current = resp.json()["current"]
+        temperature = current["temperature_2m"]
+        humidity = current["relative_humidity_2m"]
 
-        # Wait until a temperature element appears
-        temp_element = wait.until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//span[contains(text(),'°')]")
-            )
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            DELETE FROM outside_data WHERE recorded_at < NOW() - INTERVAL '7 days';
+            INSERT INTO outside_data (temperature, humidity) VALUES (%s, %s);
+            """,
+            (temperature, humidity)
         )
-
-        temperature = temp_element.text
-
-        # Find humidity text
-        humidity_element = wait.until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//*[contains(text(),'Humidity')]")
-            )
-        )
-
-        humidity = humidity_element.text.split()
-        
-
-        temperature = float(temperature.replace("°F", ""))
-        humidity[1] = float(humidity[1].replace("%", ""))
-
-        cur.execute("""
-            INSERT INTO outside_data (temperature, humidity)
-            VALUES (%s, %s)
-        """, (temperature, humidity[1]))
-
         conn.commit()
-
+        cur.close()
+        conn.close()
+        print(f"Outside: {temperature}°F  {humidity}%")
 
     except Exception as e:
-        print("Error getting weather data:", e)
+        print("Error fetching weather:", e)
 
-    finally:
-        driver.quit()
-
-
-while True:
-    time.sleep(5*60) 
-    get_weather()         
-        
+if __name__ == "__main__":
+    while True:
+        get_weather()
+        time.sleep(INTERVAL)

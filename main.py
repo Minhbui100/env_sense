@@ -61,7 +61,6 @@ while True:
 
     except Exception as e:
         print("Error reading sensor or publishing:", e)
-        # Try reconnecting MQTT
         client = connect_mqtt()
 
     sleep(SLEEP_INTERVAL)
